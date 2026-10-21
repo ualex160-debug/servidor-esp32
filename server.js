@@ -86,6 +86,4 @@ app.listen(PORT, () => {
     console.log(`Servidor activo corriendo en el puerto ${PORT}`);
 });
 
-});
-
 
