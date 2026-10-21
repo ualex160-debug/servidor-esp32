@@ -1,4 +1,5 @@
 const express = require('express');
+const mqtt = require('mqtt'); // Librería integrada para IoT
 const app = express();
 
 app.use(express.json());
@@ -10,7 +11,30 @@ let ultimoNivelGas = 0;
 let modoAutomatico = true; 
 let estadoLedManual = false; 
 
-// Interface Gráfica del Panel Web (Render Dashboard)
+// Conectar el servidor de Render al Broker Público de Wokwi
+const clientMqtt = mqtt.connect('mqtt://://hivemq.com');
+
+clientMqtt.on('connect', () => {
+    console.log('[MQTT] Conectado al Broker de HiveMQ');
+    // Escuchar el canal del sensor enviado por el ESP32
+    clientMqtt.subscribe('servidor-esp32-uuuu/sensor');
+});
+
+clientMqtt.on('message', (topic, message) => {
+    if (topic === 'servidor-esp32-uuuu/sensor') {
+        const datos = JSON.parse(message.toString());
+        ultimoNivelGas = datos.nivel || 0;
+        console.log(`[MQTT] Lectura recibida de Wokwi: ${ultimoNivelGas}`);
+
+        // Lógica automática: Enviar orden de regreso al LED si cambia el gas
+        if (modoAutomatico) {
+            let encender = ultimoNivelGas > UMBRAL_GAS;
+            clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ encender }));
+        }
+    }
+});
+
+// Panel de Control Web
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -30,7 +54,6 @@ app.get('/', (req, res) => {
                 .ok { color: #00e676; }
             </style>
             <script>
-                // Recarga automática de la pantalla cada 3 segundos
                 setInterval(() => { location.reload(); }, 3000);
                 function cambiarModo() { fetch('/api/config/modo', { method: 'POST' }); }
                 function alternarLed() { fetch('/api/config/led', { method: 'POST' }); }
@@ -38,7 +61,6 @@ app.get('/', (req, res) => {
         </head>
         <body>
             <h1>📡 IoT Remote Dashboard (Render)</h1>
-            
             <div class="card">
                 <h3>Sensor Level</h3>
                 <div class="valor">${ultimoNivelGas}</div>
@@ -46,7 +68,6 @@ app.get('/', (req, res) => {
                     ${ultimoNivelGas > UMBRAL_GAS ? '⚠️ SMOKE DETECTED' : '✅ SAFE STATUS'}
                 </span>
             </div>
-            
             <div class="card">
                 <h3>Remote Controls</h3>
                 <p>Current Mode: <strong>${modoAutomatico ? 'AUTOMATIC' : 'MANUAL'}</strong></p>
@@ -62,7 +83,6 @@ app.get('/', (req, res) => {
     `);
 });
 
-// APIs para los botones de la página
 app.post('/api/config/modo', (req, res) => {
     modoAutomatico = !modoAutomatico;
     res.json({ success: true });
@@ -70,20 +90,14 @@ app.post('/api/config/modo', (req, res) => {
 
 app.post('/api/config/led', (req, res) => {
     estadoLedManual = !estadoLedManual;
+    // Mandar orden manual inmediata al ESP32 por MQTT
+    clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ encender: estadoLedManual }));
     res.json({ success: true });
 });
 
-// !!! RUTA CORREGIDA: COINCIDE EXACTAMENTE CON EL ESP32 !!!
-app.post('/api/sensor', (req, res) => {
-    ultimoNivelGas = req.body.nivel || 0;
-    console.log(`[Sensor] Lectura en vivo procesada: ${ultimoNivelGas}`);
-    
-    let encenderLED = modoAutomatico ? (ultimoNivelGas > UMBRAL_GAS) : estadoLedManual;
-    res.json({ encender: encenderLED });
+app.listen(PORT, () => {
+    console.log(`Servidor IoT activo.`);
 });
 
-app.listen(PORT, () => {
-    console.log(`Servidor activo corriendo en el puerto ${PORT}`);
-});
 
 
