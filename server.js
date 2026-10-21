@@ -7,17 +7,19 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const UMBRAL_GAS = 400; 
 
+// Variables globales actualizadas
 let ultimoNivelGas = 0;
 let modoAutomatico = true; 
 let estadoLedManual = false; 
-let historialLecturas = []; // Guarda las últimas 15 lecturas para la gráfica
+let sistemaEncendido = true; // true = En línea, false = Apagado Remoto
+let alarmaSonando = false;   // Monitoreo del estado de la sirena
+let historialLecturas = []; 
 
-// CONFIGURACIÓN CORREGIDA: Servidor empresarial EMQX libre de bloqueos
+// Conexión al Broker de EMQX
 const clientMqtt = mqtt.connect('mqtt://broker.emqx.io:1883');
 
 clientMqtt.on('connect', () => {
     console.log('[MQTT] Conectado exitosamente al Broker de EMQX');
-    // Suscribirse al canal donde el ESP32 publica los datos del sensor
     clientMqtt.subscribe('servidor-esp32-uuuu/sensor');
 });
 
@@ -27,76 +29,105 @@ clientMqtt.on('message', (topic, message) => {
             const datos = JSON.parse(message.toString());
             ultimoNivelGas = datos.nivel || 0;
             
-            // Guardar en el historial manteniendo un límite de 15 datos
+            // Si el sistema está encendido, registramos los datos reales
             const horaActual = new Date().toLocaleTimeString();
-            historialLecturas.push({ hora: horaActual, valor: ultimoNivelGas });
+            historialLecturas.push({ hora: horaActual, valor: sistemaEncendido ? ultimoNivelGas : 0 });
             if (historialLecturas.length > 15) historialLecturas.shift();
 
-            console.log(`[MQTT] Lectura recibida: ${ultimoNivelGas} PPM`);
-
-            // Si está en modo automático, envía la respuesta inmediata al LED
-            if (modoAutomatico) {
-                let encender = ultimoNivelGas > UMBRAL_GAS;
-                clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ encender }));
+            // Lógica de control de actuadores enviada por MQTT hacia Wokwi
+            let encenderLED = false;
+            
+            if (sistemaEncendido) {
+                if (modoAutomatico) {
+                    encenderLED = ultimoNivelGas > UMBRAL_GAS;
+                } else {
+                    encenderLED = estadoLedManual;
+                }
+            } else {
+                // Si el sistema se apaga remotamente, todo va a falso obligatoriamente
+                encenderLED = false;
+                ultimoNivelGas = 0;
             }
+
+            alarmaSonando = encenderLED; // Sincronizamos el monitoreo de la alarma
+
+            // Publicamos el paquete de control consolidado hacia Wokwi
+            clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ 
+                encender: encenderLED,
+                sistemaActivo: sistemaEncendido
+            }));
+
         } catch (e) {
-            console.log('[MQTT] Error al procesar JSON');
+            console.log('[MQTT] Error al procesar datos');
         }
     }
 });
 
-// Endpoint para que la gráfica obtenga el historial en vivo sin recargar la página completa
+// Endpoint de monitoreo dinámico para la gráfica
 app.get('/api/historial', (req, res) => {
     res.json({
         nivelActual: ultimoNivelGas,
         modoAutomatico: modoAutomatico,
         estadoLedManual: estadoLedManual,
+        sistemaEncendido: sistemaEncendido,
+        alarmaSonando: alarmaSonando,
         umbral: UMBRAL_GAS,
         datos: historialLecturas
     });
 });
 
-// Interfaz Gráfica Avanzada con Chart.js (Dashboard en Inglés)
+// Interfaz Web de Control Total
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
-            <title>IoT Control Panel - ESP32</title>
+            <title>IoT Advanced Control Panel</title>
             <script src="https://jsdelivr.net"></script>
             <style>
                 body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
-                .container { display: flex; flex-wrap: wrap; justify-content: center; max-width: 1000px; margin: 0 auto; }
+                .container { display: flex; flex-wrap: wrap; justify-content: center; max-width: 1100px; margin: 0 auto; }
                 .card { background: #1e1e1e; padding: 20px; border-radius: 12px; margin: 15px; flex: 1; min-width: 280px; box-shadow: 0 4px 10px rgba(0,0,0,0.6); }
                 .card-grafica { flex: 2; min-width: 450px; }
                 h1 { color: #00e676; }
                 .valor { font-size: 2.5rem; font-weight: bold; color: #ffeb3b; margin: 10px 0; }
-                .btn { padding: 12px 24px; margin: 10px; font-weight: bold; cursor: pointer; border-radius: 5px; border: none; font-size: 1rem; width: 80%; }
+                .btn { padding: 12px 24px; margin: 8px; font-weight: bold; cursor: pointer; border-radius: 5px; border: none; font-size: 1rem; width: 85%; }
                 .btn-action { background: #2979ff; color: white; }
-                .status { font-weight: bold; padding: 8px; border-radius: 4px; display: inline-block; margin-top: 10px; }
-                .danger { background: #ff1744; color: white; }
+                .btn-power { font-size: 1.1rem; letter-spacing: 1px; }
+                .status { font-weight: bold; padding: 8px; border-radius: 4px; display: inline-block; margin-top: 5px; width: 80%; }
+                .danger { background: #ff1744; color: white; animation: blink 0.8s infinite; }
                 .ok { background: #00e676; color: black; }
+                .off { background: #757575; color: white; }
+                @keyframes blink { 50% { opacity: 0.4; } }
                 canvas { background: #151515; border-radius: 8px; padding: 10px; }
             </style>
         </head>
         <body>
-            <h1>📡 IoT Remote Dashboard & Real-Time Graph</h1>
+            <h1 id="mainTitle">📡 IoT Remote Dashboard & Mission Control</h1>
             
             <div class="container">
                 <div class="card card-grafica">
-                    <h3>Smoke / Gas Concentration History (PPM)</h3>
+                    <h3>Real-Time Gas Curve (PPM)</h3>
                     <canvas id="iotChart" width="400" height="200"></canvas>
                 </div>
 
                 <div class="card">
-                    <h3>Current Status</h3>
+                    <h3>System Power</h3>
+                    <button class="btn btn-power" id="btnPower" onclick="alternarEnergia()" style="background:#ff1744; color:white;">SHUTDOWN SYSTEM</button>
+                    
+                    <hr style="border-color:#333; margin: 15px 0;">
+                    
+                    <h3>Live Status</h3>
                     <div class="valor" id="txtPPM">0 PPM</div>
                     <div id="lblStatus" class="status ok">SAFE STATUS</div>
-                    <hr style="border-color:#333; margin: 20px 0;">
-                    <h3>Remote Controls</h3>
+                    <div id="lblSiren" class="status off" style="margin-top:8px; display:none;">🚨 SIREN ACTIVE</div>
+                    
+                    <hr style="border-color:#333; margin: 15px 0;">
+                    
+                    <h3>Hardware Controls</h3>
                     <p>Mode: <strong id="txtModo">AUTOMATIC</strong></p>
-                    <button class="btn btn-action" onclick="cambiarModo()">Change Mode</button>
+                    <button class="btn btn-action" id="btnMode" onclick="cambiarModo()">Change Mode</button>
                     <button class="btn" id="btnLed" onclick="alternarLed()">TURN LED ON</button>
                 </div>
             </div>
@@ -128,70 +159,53 @@ app.get('/', (req, res) => {
 
                 function cambiarModo() { fetch('/api/config/modo', { method: 'POST' }); }
                 function alternarLed() { fetch('/api/config/led', { method: 'POST' }); }
+                function alternarEnergia() { fetch('/api/config/energia', { method: 'POST' }); }
 
                 async function actualizarDashboard() {
                     try {
                         const res = await fetch('/api/historial');
                         const data = await res.json();
                         
+                        const btnPower = document.getElementById('btnPower');
+                        const mainTitle = document.getElementById('mainTitle');
+                        
+                        if(!data.sistemaEncendido) {
+                            // Cambios visuales si el usuario apaga el circuito remotamente
+                            mainTitle.innerText = "🛑 IoT System Offline (Remote Shutdown)";
+                            mainTitle.style.color = "#ff1744";
+                            btnPower.innerText = "POWER ON SYSTEM";
+                            btnPower.style.background = "#00e676";
+                            btnPower.style.color = "black";
+                            
+                            document.getElementById('txtPPM').innerText = "OFFLINE";
+                            document.getElementById('lblStatus').innerText = "SYSTEM DISABLED";
+                            document.getElementById('lblStatus').className = "status off";
+                            document.getElementById('lblSiren').style.display = "none";
+                            
+                            document.getElementById('btnMode').disabled = true;
+                            document.getElementById('btnLed').disabled = true;
+                            return;
+                        }
+
+                        // Restaurar panel si está activo
+                        mainTitle.innerText = "📡 IoT Remote Dashboard & Mission Control";
+                        mainTitle.style.color = "#00e676";
+                        btnPower.innerText = "SHUTDOWN SYSTEM";
+                        btnPower.style.background = "#ff1744";
+                        btnPower.style.color = "white";
+                        document.getElementById('btnMode').disabled = false;
+
                         document.getElementById('txtPPM').innerText = data.nivelActual + " PPM";
                         document.getElementById('txtModo').innerText = data.modoAutomatico ? "AUTOMATIC" : "MANUAL";
                         
+                        // Letrero de estado de peligro
                         const lblStatus = document.getElementById('lblStatus');
                         if(data.nivelActual > data.umbral) {
                             lblStatus.innerText = "⚠️ SMOKE DETECTED";
                             lblStatus.className = "status danger";
                         } else {
                             lblStatus.innerText = "✅ SAFE STATUS";
-                            lblStatus.className = "status ok";
-                        }
 
-                        const btnLed = document.getElementById('btnLed');
-                        if(data.modoAutomatico) {
-                            btnLed.disabled = true;
-                            btnLed.style.opacity = "0.4";
-                            btnLed.style.cursor = "not-allowed";
-                            btnLed.style.background = "#424242";
-                            btnLed.innerText = data.nivelActual > data.umbral ? "LED ON (AUTO)" : "LED OFF (AUTO)";
-                        } else {
-                            btnLed.disabled = false;
-                            btnLed.style.opacity = "1";
-                            btnLed.style.cursor = "pointer";
-                            btnLed.style.background = data.estadoLedManual ? "#ff1744" : "#424242";
-                            btnLed.innerText = data.estadoLedManual ? "TURN LED OFF" : "TURN LED ON";
-                        }
-
-                        const horas = data.datos.map(d => d.hora);
-                        const valores = data.datos.map(d => d.valor);
-                        
-                        iotChart.data.labels = horas;
-                        iotChart.data.datasets[0].data = valores;
-                        iotChart.update('none'); 
-
-                    } catch(e) { console.log("Error al actualizar interfaz"); }
-                }
-
-                setInterval(actualizarDashboard, 2000);
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-app.post('/api/config/modo', (req, res) => {
-    modoAutomatico = !modoAutomatico;
-    res.json({ success: true });
-});
-
-app.post('/api/config/led', (req, res) => {
-    estadoLedManual = !estadoLedManual;
-    clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ encender: estadoLedManual }));
-    res.json({ success: true });
-});
-
-app.listen(PORT, () => {
-    console.log(`Servidor IoT activo en el puerto ${PORT}`);
-});
 
 
 
