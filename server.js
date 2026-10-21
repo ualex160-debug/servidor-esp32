@@ -1,13 +1,13 @@
 const express = require('express');
 const app = express();
 
-// OBLIGATORIO: Permite que el servidor pueda leer el formato JSON de Wokwi
-app.use(express.json()); 
+// Permite procesar el formato JSON que envía el ESP32 desde Wokwi
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const UMBRAL_GAS = 400; 
 
-// Variables globales para el control total del sistema IoT
+// Variables globales para el control dinámico del sistema IoT
 let ultimoNivelGas = 0;
 let modoAutomatico = true; 
 let estadoLedManual = false; 
@@ -31,7 +31,6 @@ app.get('/api/historial', (req, res) => {
 // 🔌 API 2: Recibe los datos del ESP32 de Wokwi y le devuelve las órdenes
 app.post('/api/sensor', (req, res) => {
     if (!sistemaEncendido) {
-        // Si el sistema está apagado desde Render, ordena apagar todo
         ultimoNivelGas = 0;
         alarmaSonando = false;
         return res.json({ encender: false, sistemaActivo: false });
@@ -64,7 +63,7 @@ app.post('/api/sensor', (req, res) => {
     });
 });
 
-// Botones de control de la página web
+// APIs internas para interactuar con los botones de la página web
 app.post('/api/config/modo', (req, res) => { modoAutomatico = !modoAutomatico; res.json({ success: true }); });
 app.post('/api/config/led', (req, res) => { estadoLedManual = !estadoLedManual; res.json({ success: true }); });
 app.post('/api/config/energia', (req, res) => { 
@@ -73,7 +72,7 @@ app.post('/api/config/energia', (req, res) => {
     res.json({ success: true }); 
 });
 
-// 📡 Interfaz Gráfica Avanzada en Inglés con Chart.js
+// 📡 Interfaz Gráfica del Panel Web (Dashboard)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -126,29 +125,38 @@ app.get('/', (req, res) => {
             </div>
 
             <script>
-                const ctx = document.getElementById('iotChart').getContext('2d');
-                const iotChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: [],
-                        datasets: [{
-                            label: 'Gas Level (PPM)',
-                            data: [],
-                            borderColor: '#00e676',
-                            backgroundColor: 'rgba(0, 230, 118, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.3
-                        }]
-                    },
-                    options: {
-                        scales: {
-                            y: { beginAtZero: true, max: 1000, grid: { color: '#333' }, ticks: { color: '#fff' } },
-                            x: { grid: { color: '#333' }, ticks: { color: '#fff' } }
+                let iotChart;
+                
+                // Inicializar gráfica de forma segura al cargar la página
+                window.onload = function() {
+                    const ctx = document.getElementById('iotChart').getContext('2d');
+                    iotChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: [],
+                            datasets: [{
+                                label: 'Gas Level (PPM)',
+                                data: [],
+                                borderColor: '#00e676',
+                                backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3
+                            }]
                         },
-                        plugins: { legend: { labels: { color: '#fff' } } }
-                    }
-                });
+                        options: {
+                            responsive: true,
+                            scales: {
+                                y: { beginAtZero: true, max: 1000, grid: { color: '#333' }, ticks: { color: '#fff' } },
+                                x: { grid: { color: '#333' }, ticks: { color: '#fff' } }
+                            },
+                            plugins: { legend: { labels: { color: '#fff' } } }
+                        }
+                    });
+                    
+                    // Iniciar la consulta automática cada 2 segundos
+                    setInterval(actualizarDashboard, 2000);
+                };
 
                 function cambiarModo() { fetch('/api/config/modo', { method: 'POST' }); }
                 function alternarLed() { fetch('/api/config/led', { method: 'POST' }); }
@@ -195,18 +203,44 @@ app.get('/', (req, res) => {
                             lblStatus.className = "status danger";
                         } else {
                             lblStatus.innerText = "✅ SAFE STATUS";
-                            lblStatus.className = "status ok";
-                        }
+                            
+lblStatus.className = "status ok";
+}
+const lblSiren = document.getElementById('lblSiren');
+if(data.alarmaSonando) {
+lblSiren.style.display = "inline-block";
+} else {
+lblSiren.style.display = "none";
+}
+const btnLed = document.getElementById('btnLed');
+if(data.modoAutomatico) {
+btnLed.disabled = true;
+btnLed.style.opacity = "0.4";
+btnLed.style.background = "#424242";
+btnLed.innerText = data.nivelActual > data.umbral ? "LED ON (AUTO)" : "LED OFF (AUTO)";
+} else {
+btnLed.disabled = false;
+btnLed.style.opacity = "1";
+btnLed.style.background = data.estadoLedManual ? "#ff1744" : "#424242";
+btnLed.innerText = data.estadoLedManual ? "TURN LED OFF" : "TURN LED ON";
+}
+if (iotChart) {
+const horas = data.datos.map(d => d.hora);
+const valores = data.datos.map(d => d.valor);
+iotChart.data.labels = horas;
+iotChart.data.datasets[0].data = valores;
+iotChart.update('none');
+}
+} catch(e) { console.log(e); }
+}
 
-                        const lblSiren = document.getElementById('lblSiren');
-                        if(data.alarmaSonando) {
-                            lblSiren.style.display = "inline-block";
-                        } else {
-                            lblSiren.style.display = "none";
-                        }
 
 
-
+`);
+});
+app.listen(PORT, () => {
+console.log(Servidor de control total IoT activo en el puerto ${PORT});
+});
 
 
 
