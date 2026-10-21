@@ -1,7 +1,6 @@
 const express = require('express');
 const app = express();
 
-// Permite leer los paquetes JSON enviados por el ESP32
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
@@ -11,7 +10,7 @@ let ultimoNivelGas = 0;
 let modoAutomatico = true; 
 let estadoLedManual = false; 
 
-// Interfaz Gráfica (Panel de Control)
+// Interface Gráfica del Panel Web (Render Dashboard)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -31,7 +30,7 @@ app.get('/', (req, res) => {
                 .ok { color: #00e676; }
             </style>
             <script>
-                // Recarga automática para actualizar el panel cada 3 segundos
+                // Recarga automática de la pantalla cada 3 segundos
                 setInterval(() => { location.reload(); }, 3000);
                 function cambiarModo() { fetch('/api/config/modo', { method: 'POST' }); }
                 function alternarLed() { fetch('/api/config/led', { method: 'POST' }); }
@@ -63,7 +62,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// APIs para los botones de la página web
+// APIs para los botones de la página
 app.post('/api/config/modo', (req, res) => {
     modoAutomatico = !modoAutomatico;
     res.json({ success: true });
@@ -74,18 +73,19 @@ app.post('/api/config/led', (req, res) => {
     res.json({ success: true });
 });
 
-// Ruta de comunicación con Wokwi
+// !!! RUTA CORREGIDA: COINCIDE EXACTAMENTE CON EL ESP32 !!!
 app.post('/api/sensor', (req, res) => {
     ultimoNivelGas = req.body.nivel || 0;
-    console.log(`[Sensor] Lectura recibida: ${ultimoNivelGas}`);
+    console.log(`[Sensor] Lectura en vivo procesada: ${ultimoNivelGas}`);
     
-    // Decidir el estado del LED según el modo seleccionado
     let encenderLED = modoAutomatico ? (ultimoNivelGas > UMBRAL_GAS) : estadoLedManual;
     res.json({ encender: encenderLED });
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor IoT corriendo con éxito`);
+    console.log(`Servidor activo corriendo en el puerto ${PORT}`);
+});
+
 });
 
 
