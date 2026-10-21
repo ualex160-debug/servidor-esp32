@@ -12,11 +12,12 @@ let modoAutomatico = true;
 let estadoLedManual = false; 
 let historialLecturas = []; // Guarda las últimas 15 lecturas para la gráfica
 
-// Conexión al Broker de Mosquitto
-const clientMqtt = mqtt.connect('mqtt://test.mosquitto.org');
+// CONFIGURACIÓN CORREGIDA: Servidor empresarial EMQX libre de bloqueos
+const clientMqtt = mqtt.connect('mqtt://broker.emqx.io:1883');
 
 clientMqtt.on('connect', () => {
-    console.log('[MQTT] Conectado exitosamente al Broker de Mosquitto');
+    console.log('[MQTT] Conectado exitosamente al Broker de EMQX');
+    // Suscribirse al canal donde el ESP32 publica los datos del sensor
     clientMqtt.subscribe('servidor-esp32-uuuu/sensor');
 });
 
@@ -33,6 +34,7 @@ clientMqtt.on('message', (topic, message) => {
 
             console.log(`[MQTT] Lectura recibida: ${ultimoNivelGas} PPM`);
 
+            // Si está en modo automático, envía la respuesta inmediata al LED
             if (modoAutomatico) {
                 let encender = ultimoNivelGas > UMBRAL_GAS;
                 clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ encender }));
@@ -54,7 +56,7 @@ app.get('/api/historial', (req, res) => {
     });
 });
 
-// Interfaz Gráfica Avanzada con Chart.js
+// Interfaz Gráfica Avanzada con Chart.js (Dashboard en Inglés)
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -62,7 +64,6 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <title>IoT Control Panel - ESP32</title>
-            <!-- Inclusión de la librería Chart.js desde servidor CDN -->
             <script src="https://jsdelivr.net"></script>
             <style>
                 body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
@@ -83,13 +84,11 @@ app.get('/', (req, res) => {
             <h1>📡 IoT Remote Dashboard & Real-Time Graph</h1>
             
             <div class="container">
-                <!-- Tarjeta de Monitoreo Analítico -->
                 <div class="card card-grafica">
-                    <h3>Humo / Gas Concentration History (PPM)</h3>
+                    <h3>Smoke / Gas Concentration History (PPM)</h3>
                     <canvas id="iotChart" width="400" height="200"></canvas>
                 </div>
 
-                <!-- Tarjeta de Controles e Interruptores -->
                 <div class="card">
                     <h3>Current Status</h3>
                     <div class="valor" id="txtPPM">0 PPM</div>
@@ -103,7 +102,6 @@ app.get('/', (req, res) => {
             </div>
 
             <script>
-                // Inicialización de la Gráfica de Línea de Chart.js
                 const ctx = document.getElementById('iotChart').getContext('2d');
                 const iotChart = new Chart(ctx, {
                     type: 'line',
@@ -128,17 +126,14 @@ app.get('/', (req, res) => {
                     }
                 });
 
-                // Peticiones asíncronas en segundo plano (Evitan recargar toda la página)
                 function cambiarModo() { fetch('/api/config/modo', { method: 'POST' }); }
                 function alternarLed() { fetch('/api/config/led', { method: 'POST' }); }
 
-                // Función de actualización en tiempo real mediante API fetch (Cada 2 segundos)
                 async function actualizarDashboard() {
                     try {
                         const res = await fetch('/api/historial');
                         const data = await res.json();
                         
-                        // Actualizar textos e indicadores del panel
                         document.getElementById('txtPPM').innerText = data.nivelActual + " PPM";
                         document.getElementById('txtModo').innerText = data.modoAutomatico ? "AUTOMATIC" : "MANUAL";
                         
@@ -166,13 +161,12 @@ app.get('/', (req, res) => {
                             btnLed.innerText = data.estadoLedManual ? "TURN LED OFF" : "TURN LED ON";
                         }
 
-                        // Actualizar los datos de la gráfica dinámicamente
                         const horas = data.datos.map(d => d.hora);
                         const valores = data.datos.map(d => d.valor);
                         
                         iotChart.data.labels = horas;
                         iotChart.data.datasets[0].data = valores;
-                        iotChart.update('none'); // Actualización fluida sin parpadeos
+                        iotChart.update('none'); 
 
                     } catch(e) { console.log("Error al actualizar interfaz"); }
                 }
@@ -196,9 +190,8 @@ app.post('/api/config/led', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor IoT con gráfica corriendo en el puerto ${PORT}`);
+    console.log(`Servidor IoT activo en el puerto ${PORT}`);
 });
-
 
 
 
