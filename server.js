@@ -1,69 +1,21 @@
 const express = require('express');
-const mqtt = require('mqtt');
 const app = express();
 
-app.use(express.json());
+// OBLIGATORIO: Permite que el servidor pueda leer el formato JSON de Wokwi
+app.use(express.json()); 
 
 const PORT = process.env.PORT || 3000;
 const UMBRAL_GAS = 400; 
 
-// Variables globales actualizadas
+// Variables globales para el control total del sistema IoT
 let ultimoNivelGas = 0;
 let modoAutomatico = true; 
 let estadoLedManual = false; 
-let sistemaEncendido = true; // true = En línea, false = Apagado Remoto
-let alarmaSonando = false;   // Monitoreo del estado de la sirena
-let historialLecturas = []; 
+let sistemaEncendido = true; 
+let alarmaSonando = false;   
+let historialLecturas = [];  
 
-// Conexión al Broker de EMQX
-const clientMqtt = mqtt.connect('mqtt://broker.emqx.io:1883');
-
-clientMqtt.on('connect', () => {
-    console.log('[MQTT] Conectado exitosamente al Broker de EMQX');
-    clientMqtt.subscribe('servidor-esp32-uuuu/sensor');
-});
-
-clientMqtt.on('message', (topic, message) => {
-    if (topic === 'servidor-esp32-uuuu/sensor') {
-        try {
-            const datos = JSON.parse(message.toString());
-            ultimoNivelGas = datos.nivel || 0;
-            
-            // Si el sistema está encendido, registramos los datos reales
-            const horaActual = new Date().toLocaleTimeString();
-            historialLecturas.push({ hora: horaActual, valor: sistemaEncendido ? ultimoNivelGas : 0 });
-            if (historialLecturas.length > 15) historialLecturas.shift();
-
-            // Lógica de control de actuadores enviada por MQTT hacia Wokwi
-            let encenderLED = false;
-            
-            if (sistemaEncendido) {
-                if (modoAutomatico) {
-                    encenderLED = ultimoNivelGas > UMBRAL_GAS;
-                } else {
-                    encenderLED = estadoLedManual;
-                }
-            } else {
-                // Si el sistema se apaga remotamente, todo va a falso obligatoriamente
-                encenderLED = false;
-                ultimoNivelGas = 0;
-            }
-
-            alarmaSonando = encenderLED; // Sincronizamos el monitoreo de la alarma
-
-            // Publicamos el paquete de control consolidado hacia Wokwi
-            clientMqtt.publish('servidor-esp32-uuuu/led', JSON.stringify({ 
-                encender: encenderLED,
-                sistemaActivo: sistemaEncendido
-            }));
-
-        } catch (e) {
-            console.log('[MQTT] Error al procesar datos');
-        }
-    }
-});
-
-// Endpoint de monitoreo dinámico para la gráfica
+// 📊 API 1: Envía el historial de datos para alimentar la gráfica en la web
 app.get('/api/historial', (req, res) => {
     res.json({
         nivelActual: ultimoNivelGas,
@@ -76,7 +28,52 @@ app.get('/api/historial', (req, res) => {
     });
 });
 
-// Interfaz Web de Control Total
+// 🔌 API 2: Recibe los datos del ESP32 de Wokwi y le devuelve las órdenes
+app.post('/api/sensor', (req, res) => {
+    if (!sistemaEncendido) {
+        // Si el sistema está apagado desde Render, ordena apagar todo
+        ultimoNivelGas = 0;
+        alarmaSonando = false;
+        return res.json({ encender: false, sistemaActivo: false });
+    }
+
+    // Leer el valor enviado por Wokwi
+    ultimoNivelGas = req.body.nivel || 0;
+    
+    // Guardar en el historial dinámico para la gráfica
+    const horaActual = new Date().toLocaleTimeString();
+    historialLecturas.push({ hora: horaActual, valor: ultimoNivelGas });
+    if (historialLecturas.length > 15) historialLecturas.shift();
+
+    console.log(`[Render] Nivel de gas recibido de Wokwi: ${ultimoNivelGas} PPM`);
+
+    // Decidir el estado del LED y la alarma sonora
+    let encenderActuadores = false;
+    if (modoAutomatico) {
+        encenderActuadores = ultimoNivelGas > UMBRAL_GAS;
+    } else {
+        encenderActuadores = estadoLedManual;
+    }
+
+    alarmaSonando = encenderActuadores;
+
+    // Responder al ESP32 con las órdenes consolidadas
+    res.json({ 
+        encender: encenderActuadores, 
+        sistemaActivo: true 
+    });
+});
+
+// Botones de control de la página web
+app.post('/api/config/modo', (req, res) => { modoAutomatico = !modoAutomatico; res.json({ success: true }); });
+app.post('/api/config/led', (req, res) => { estadoLedManual = !estadoLedManual; res.json({ success: true }); });
+app.post('/api/config/energia', (req, res) => { 
+    sistemaEncendido = !sistemaEncendido; 
+    if(!sistemaEncendido) { ultimoNivelGas = 0; alarmaSonando = false; }
+    res.json({ success: true }); 
+});
+
+// 📡 Interfaz Gráfica Avanzada en Inglés con Chart.js
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -115,16 +112,12 @@ app.get('/', (req, res) => {
                 <div class="card">
                     <h3>System Power</h3>
                     <button class="btn btn-power" id="btnPower" onclick="alternarEnergia()" style="background:#ff1744; color:white;">SHUTDOWN SYSTEM</button>
-                    
                     <hr style="border-color:#333; margin: 15px 0;">
-                    
                     <h3>Live Status</h3>
                     <div class="valor" id="txtPPM">0 PPM</div>
                     <div id="lblStatus" class="status ok">SAFE STATUS</div>
-                    <div id="lblSiren" class="status off" style="margin-top:8px; display:none;">🚨 SIREN ACTIVE</div>
-                    
+                    <div id="lblSiren" class="status danger" style="margin-top:8px; display:none;">🚨 SIREN ACTIVE</div>
                     <hr style="border-color:#333; margin: 15px 0;">
-                    
                     <h3>Hardware Controls</h3>
                     <p>Mode: <strong id="txtModo">AUTOMATIC</strong></p>
                     <button class="btn btn-action" id="btnMode" onclick="cambiarModo()">Change Mode</button>
@@ -170,7 +163,6 @@ app.get('/', (req, res) => {
                         const mainTitle = document.getElementById('mainTitle');
                         
                         if(!data.sistemaEncendido) {
-                            // Cambios visuales si el usuario apaga el circuito remotamente
                             mainTitle.innerText = "🛑 IoT System Offline (Remote Shutdown)";
                             mainTitle.style.color = "#ff1744";
                             btnPower.innerText = "POWER ON SYSTEM";
@@ -187,7 +179,6 @@ app.get('/', (req, res) => {
                             return;
                         }
 
-                        // Restaurar panel si está activo
                         mainTitle.innerText = "📡 IoT Remote Dashboard & Mission Control";
                         mainTitle.style.color = "#00e676";
                         btnPower.innerText = "SHUTDOWN SYSTEM";
@@ -198,13 +189,22 @@ app.get('/', (req, res) => {
                         document.getElementById('txtPPM').innerText = data.nivelActual + " PPM";
                         document.getElementById('txtModo').innerText = data.modoAutomatico ? "AUTOMATIC" : "MANUAL";
                         
-                        // Letrero de estado de peligro
                         const lblStatus = document.getElementById('lblStatus');
                         if(data.nivelActual > data.umbral) {
                             lblStatus.innerText = "⚠️ SMOKE DETECTED";
                             lblStatus.className = "status danger";
                         } else {
                             lblStatus.innerText = "✅ SAFE STATUS";
+                            lblStatus.className = "status ok";
+                        }
+
+                        const lblSiren = document.getElementById('lblSiren');
+                        if(data.alarmaSonando) {
+                            lblSiren.style.display = "inline-block";
+                        } else {
+                            lblSiren.style.display = "none";
+                        }
+
 
 
 
