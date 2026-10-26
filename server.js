@@ -1,54 +1,41 @@
-/// server.js
+// server.js
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.json());
-
-// !!! REEMPLAZA CON TU CHANNEL ID Y TU WRITE API KEY !!!
-const CHANNEL_ID = "123456";
-const WRITE_API_KEY = "TU_WRITE_API_KEY";
 
 let nivelGas = 0;
 let estadoCircuito = "APAGADO";
 
-// Modificar estado del botón desde la interfaz web de Render
-app.post('/api/control', async (req, res) => {
+// Endpoint unificado: Recibe gas y responde con el comando del LED
+app.post('/api/gas', (req, res) => {
+    if (req.body && req.body.valor !== undefined) {
+        nivelGas = parseInt(req.body.valor);
+    }
+    // Responde en formato JSON plano directo
+    res.status(200).json({ comando: estadoCircuito });
+});
+
+// Cambiar estado desde los botones
+app.post('/api/control', (req, res) => {
     if (req.body && req.body.estado) {
         estadoCircuito = req.body.estado;
-        const valorBoton = estadoCircuito === "ENCENDIDO" ? 1 : 0;
-        
-        // Guardar la orden en el Field 2 de ThingSpeak
-        try {
-            await fetch(`https://thingspeak.com{WRITE_API_KEY}&field2=${valorBoton}`);
-        } catch (e) { console.error(e); }
     }
     res.status(200).json({ status: "ok" });
 });
 
-// Interfaz Web Gráfica
-app.get('/', async (req, res) => {
-    try {
-        // Consultar el último dato seguro registrado en el feed de ThingSpeak
-        const response = await fetch(`https://thingspeak.com{CHANNEL_ID}/feeds/last.json`);
-        const data = await response.json();
-        if (data) {
-            nivelGas = data.field1 ? parseInt(data.field1) : 0;
-            if (data.field2 !== undefined) {
-                estadoCircuito = parseInt(data.field2) === 1 ? "ENCENDIDO" : "APAGADO";
-            }
-        }
-    } catch (e) {}
-
+// Interfaz Gráfica
+app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Panel de Gas por ThingSpeak</title>
+        <title>Panel Render Forzado</title>
         <style>
-            body { font-family: sans-serif; background: #121214; color: #fff; text-align: center; padding-top: 50px; }
+            body { font-family: Arial, sans-serif; background: #121214; color: #fff; text-align: center; padding-top: 50px; }
             .card { background: #1a1a1e; display: inline-block; padding: 40px; border-radius: 15px; border: 1px solid #2a2a30; }
             #gas-val { font-size: 70px; color: #ff9100; font-family: monospace; margin: 20px 0; }
             .btn { padding: 15px 35px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; margin: 10px; color: white; }
@@ -56,8 +43,7 @@ app.get('/', async (req, res) => {
             .btn-off { background: #ff3d00; }
         </style>
         <script>
-            // Recargar la pantalla para consultar a ThingSpeak el valor actual
-            setInterval(() => { location.reload(); }, 15000); // Sincronizado a 15 segundos
+            setInterval(() => { location.reload(); }, 2500);
 
             function cambiarEstado(nuevoEstado) {
                 fetch('/api/control', {
@@ -70,9 +56,9 @@ app.get('/', async (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h2>Sensor de Gas (Puente ThingSpeak Activo)</h2>
-            <div id="gas-val">${nivelGas}</div>
-            <p>Circuito: <strong>${estadoCircuito}</strong></p>
+            <h2>Consola de Gas Directa (Render)</h2>
+            <div id="gas-val" style="color: ${nivelGas > 2500 ? '#ff3d00' : '#ff9100'}">${nivelGas}</div>
+            <p>Estado Remoto: <strong>${estadoCircuito}</strong></p>
             <button class="btn btn-on" onclick="cambiarEstado('ENCENDIDO')">ENCENDER</button>
             <button class="btn btn-off" onclick="cambiarEstado('APAGADO')">APAGAR</button>
         </div>
@@ -83,3 +69,4 @@ app.get('/', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor activo`));
+(`Servidor activo`));
