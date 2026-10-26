@@ -1,19 +1,13 @@
 {
-  "name": "servidor-esp32",
+  "name": "wokwi-backend",
   "version": "1.0.0",
-  "description": "Servidor IoT para control remoto de ESP32 con Render y Wokwi",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "mqtt": "^5.5.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "author": "Anónimo",
-  "license": "ISC"
+    "socket.io": "^4.7.5",
+    "cors": "^2.8.5"
+  }
 }
-
