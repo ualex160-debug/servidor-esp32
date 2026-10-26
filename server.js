@@ -19,13 +19,11 @@ let estadoCircuito = "APAGADO";
 
 // --- ENDPOINT QUE RECIBE LOS DATOS DEL ESP32 ---
 app.post('/api/gas', (req, res) => {
-    // Validar que Wokwi esté enviando el objeto esperado
     if (req.body && req.body.valor !== undefined) {
         nivelGas = parseInt(req.body.valor);
-        // Transmitir inmediatamente el valor a la página web en tiempo real
+        // Transmitir valor al navegador en tiempo real
         io.emit('actualizar_gas', { valor: nivelGas });
     }
-    
     // Responder obligatoriamente con el comando actual para el circuito
     res.status(200).json({ status: "ok", comando: estadoCircuito });
 });
@@ -34,6 +32,7 @@ app.get('/api/estado', (req, res) => {
     res.status(200).json({ comando: estadoCircuito });
 });
 
+// --- ENDPOINT DE LOS BOTONES DE LA WEB ---
 app.post('/api/control', (req, res) => {
     if (req.body && req.body.estado) {
         estadoCircuito = req.body.estado;
