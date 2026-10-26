@@ -3,35 +3,45 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const axios = require('axios'); // Asegúrate de que 'axios' esté en tus dependencies del package.json
 
 const app = express();
-
-// Desactivar estrictamente el bloqueo de contenido no seguro para el microcontrolador
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
+// IP virtual por defecto que expone Wokwi hacia internet externamente
+const WOKWI_ESP32_URL = "http://10.10.0.2:80"; 
 let nivelGas = 0;
-let estadoCircuito = "APAGADO"; 
+let estadoCircuito = "APAGADO";
 
-// Recibir datos de Wokwi
-app.post('/api/gas', (req, res) => {
-    if (req.body && req.body.valor !== undefined) {
-        nivelGas = parseInt(req.body.valor);
-        io.emit('actualizar_gas', { valor: nivelGas });
+// Bucle automático de Render para extraer datos de Wokwi (Cada 2 segundos)
+setInterval(async () => {
+    try {
+        const response = await axios.get(`${WOKWI_ESP32_URL}/api/datos`, { timeout: 1500 });
+        if (response.data) {
+            nivelGas = response.data.valor;
+            estadoCircuito = response.data.comando;
+            io.emit('actualizar_gas', { valor: nivelGas });
+            io.emit('cambio_estado', estadoCircuito);
+        }
+    } catch (error) {
+        // Ignora silenciosamente si Wokwi está en pausa o cargando
     }
-    res.status(200).json({ status: "ok", comando: estadoCircuito });
-});
+}, 2000);
 
-// Control desde la web
-app.post('/api/control', (req, res) => {
+// Endpoint activado por los botones del Dashboard Web
+app.post('/api/control', async (req, res) => {
     if (req.body && req.body.estado) {
         estadoCircuito = req.body.estado;
         io.emit('cambio_estado', estadoCircuito);
+        
+        // Reenviar de inmediato la orden al puerto abierto del ESP32
+        try {
+            await axios.post(`${WOKWI_ESP32_URL}/api/control`, { estado: estadoCircuito }, { timeout: 1500 });
+        } catch (e) {}
     }
     res.status(200).json({ status: "ok", estado: estadoCircuito });
 });
@@ -43,7 +53,7 @@ app.get('/', (req, res) => {
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Panel de Control Wokwi</title>
+        <title>Panel Directo por Puerto</title>
         <script src="https://socket.io"></script>
         <style>
             body { font-family: sans-serif; background: #121214; color: #fff; text-align: center; padding-top: 50px; }
@@ -52,14 +62,14 @@ app.get('/', (req, res) => {
             .btn { padding: 15px 35px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; margin: 10px; }
             .btn-on { background: #00e676; color: #000; }
             .btn-off { background: #ff3d00; color: #fff; }
-            #estado-txt { font-weight: bold; color: #00e676; }
+            #estado-txt { font-weight: bold; color: #ff3d00; }
         </style>
     </head>
     <body>
         <div class="card">
-            <h2>Sensor de Gas en Tiempo Real</h2>
+            <h2>Monitoreo Conectado por Puerto Local</h2>
             <div id="gas-val">${nivelGas}</div>
-            <p>Estado del Circuito: <span id="estado-txt">${estadoCircuito}</span></p>
+            <p>Circuito Embebido: <span id="estado-txt">${estadoCircuito}</span></p>
             <button class="btn btn-on" onclick="cambiarEstado('ENCENDIDO')">ENCENDER</button>
             <button class="btn btn-off" onclick="cambiarEstado('APAGADO')">APAGAR</button>
         </div>
@@ -88,4 +98,4 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+server.listen(PORT, () => console.log(`Servidor activo en puerto ${PORT}`));
