@@ -1,6 +1,7 @@
 {
-  "name": "wokwi-backend",
+  "name": "wokwi-gas-control",
   "version": "1.0.0",
+  "description": "Servidor para conectar Wokwi con Render",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
