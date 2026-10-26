@@ -1,5 +1,4 @@
 // server.js
-// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -29,7 +28,6 @@ let estadoCircuito = "APAGADO"; // "ENCENDIDO" o "APAGADO"
 
 // El ESP32 envía el valor del gas aquí mediante POST
 app.post('/api/gas', (req, res) => {
-    // Si Wokwi envía { "valor": 450 }, lo capturamos
     nivelGas = req.body.valor !== undefined ? req.body.valor : nivelGas;
     
     // Emitir inmediatamente el valor a la interfaz Web en tiempo real
@@ -48,13 +46,12 @@ app.get('/api/estado', (req, res) => {
 app.post('/api/control', (req, res) => {
     if (req.body.estado) {
         estadoCircuito = req.body.estado;
-        // Notificar a la web que el estado cambió gráficamente
         io.emit('cambio_estado', estadoCircuito);
     }
     res.status(200).json({ status: "ok", estado: estadoCircuito });
 });
 
-// --- INTERFAZ GRÁFICA WEB ---
+// --- INTERFAZ GRÁFICA WEB PRINCIPAL ---
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -62,64 +59,142 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Monitoreo Panel Gas y Circuito</title>
-        <!-- Cargamos Socket.io desde CDN externo para evitar errores de ruta en producción -->
+        <title>Dashboard - Sensor de Gas Wokwi</title>
         <script src="https://socket.io"></script>
         <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #eef2f3; padding: 40px; margin: 0; }
-            .card { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); display: inline-block; min-width: 300px; }
-            h2 { color: #333; margin-top: 0; }
-            #gas-val { font-size: 64px; font-weight: bold; color: #d35400; margin: 20px 0; }
-            .status-box { font-size: 18px; margin-bottom: 25px; color: #555; }
-            #estado-txt { padding: 4px 10px; border-radius: 5px; font-weight: bold; }
-            .estado-ENCENDIDO { background: #2ecc71; color: white; }
-            .estado-APAGADO { background: #e74c3c; color: white; }
-            .btn-container { display: flex; justify-content: space-around; gap: 10px; }
-            .btn { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; transition: background 0.2s; }
-            .btn-on { background: #27ae60; }
-            .btn-on:hover { background: #219653; }
-            .btn-off { background: #c0392b; }
-            .btn-off:hover { background: #962d22; }
+            :root {
+                --bg-color: #121214;
+                --card-bg: #1a1a1e;
+                --text-color: #ffffff;
+                --accent-green: #00e676;
+                --accent-red: #ff3d00;
+                --accent-orange: #ff9100;
+            }
+            body { 
+                font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+                background-color: var(--bg-color); 
+                color: var(--text-color);
+                margin: 0; 
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+            }
+            .dashboard { 
+                background: var(--card-bg); 
+                padding: 40px; 
+                border-radius: 20px; 
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+                text-align: center;
+                width: 360px;
+                border: 1px solid #2a2a30;
+            }
+            h1 { font-size: 24px; margin-bottom: 5px; color: #a0a0b0; text-transform: uppercase; letter-spacing: 1px; }
+            h2 { font-size: 14px; margin-top: 0; margin-bottom: 30px; color: #606070; }
+            
+            /* Visualizador del Sensor de Gas */
+            .gas-display {
+                background: #222226;
+                border-radius: 15px;
+                padding: 20px;
+                margin-bottom: 30px;
+                border-bottom: 4px solid var(--accent-orange);
+            }
+            .gas-label { font-size: 12px; color: #808090; text-transform: uppercase; font-weight: bold; }
+            #gas-val { font-size: 64px; font-weight: 300; color: var(--accent-orange); margin: 10px 0; font-family: monospace; }
+            
+            /* Caja de Estado */
+            .status-container {
+                font-size: 16px;
+                margin-bottom: 30px;
+                color: #b0b0c0;
+            }
+            #estado-txt {
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-weight: bold;
+                font-size: 14px;
+                letter-spacing: 0.5px;
+                display: inline-block;
+                margin-left: 8px;
+            }
+            .estado-ENCENDIDO { background: rgba(0, 230, 118, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+            .estado-APAGADO { background: rgba(255, 61, 0, 0.15); color: var(--accent-red); border: 1px solid var(--accent-red); }
+            
+            /* Botones de Control */
+            .btn-group { display: flex; gap: 15px; }
+            .btn { 
+                flex: 1; 
+                padding: 16px; 
+                font-size: 15px; 
+                font-weight: bold; 
+                border: none; 
+                border-radius: 12px; 
+                cursor: pointer; 
+                color: white; 
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            }
+            .btn-on { background: var(--accent-green); color: #000; }
+            .btn-on:hover { background: #00c864; transform: translateY(-2px); }
+            .btn-off { background: #323238; color: #fff; border: 1px solid #424248; }
+            .btn-off:hover { background: var(--accent-red); border-color: var(--accent-red); transform: translateY(-2px); }
         </style>
     </head>
     <body>
-        <div class="card">
-            <h2>Sensor de Gas</h2>
-            <div id="gas-val">${nivelGas}</div>
+        <div class="dashboard">
+            <h1>Panel de Control</h1>
+            <h2>Monitoreo de Sensor & Circuito Wokwi</h2>
             
-            <div class="status-box">
-                Circuito: <span id="estado-txt" class="estado-${estadoCircuito}">${estadoCircuito}</span>
+            <!-- Pantalla del Sensor -->
+            <div class="gas-display">
+                <div class="gas-label">Nivel de Gas detectado</div>
+                <div id="gas-val">${nivelGas}</div>
             </div>
             
-            <div class="btn-container">
+            <!-- Estado Actual -->
+            <div class="status-container">
+                Circuito Wokwi: <span id="estado-txt" class="estado-${estadoCircuito}">${estadoCircuito}</span>
+            </div>
+            
+            <!-- Botones de Encendido y Apagado -->
+            <div class="btn-group">
                 <button class="btn btn-on" onclick="cambiarEstado('ENCENDIDO')">ENCENDER</button>
                 <button class="btn btn-off" onclick="cambiarEstado('APAGADO')">APAGAR</button>
             </div>
         </div>
 
         <script>
-            // Conexión automática al mismo host del servidor
+            // Conexión en tiempo real con Socket.io
             const socket = io();
             
-            // Evento: Actualizar número del gas en tiempo real
+            // Actualizar datos del sensor en la pantalla
             socket.on('actualizar_gas', (data) => {
                 document.getElementById('gas-val').innerText = data.valor;
+                
+                // Efecto visual dinámico basado en la concentración de gas
+                const gasValElement = document.getElementById('gas-val');
+                if(data.valor > 600) {
+                    gasValElement.style.color = '#ff3d00'; // Alerta roja si es muy alto
+                } else {
+                    gasValElement.style.color = '#ff9100'; // Naranja normal
+                }
             });
 
-            // Evento: Cambiar los estilos del texto de estado (Verde / Rojo)
+            // Actualizar gráficamente la etiqueta de estado de los botones
             socket.on('cambio_estado', (nuevoEstado) => {
                 const label = document.getElementById('estado-txt');
                 label.innerText = nuevoEstado;
                 label.className = 'estado-' + nuevoEstado;
             });
 
-            // Función para enviar la orden al presionar botones
+            // Función HTTP POST para alternar la orden desde la web
             function cambiarEstado(nuevoEstado) {
                 fetch('/api/control', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ estado: nuevoEstado })
-                }).catch(err => console.error("Error al controlar:", err));
+                }).catch(err => console.error("Error al enviar comando:", err));
             }
         </script>
     </body>
@@ -127,13 +202,13 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Manejo de conexiones WebSocket de depuración
+// Monitoreo de conexiones del WebSocket en consola
 io.on('connection', (socket) => {
-    console.log('Cliente web conectado ID:', socket.id);
+    console.log('Dispositivo Web sincronizado con éxito. ID:', socket.id);
 });
 
-// CONFIGURACIÓN CRUCIAL PARA RENDER: Escuchar en el puerto dinámico asignado por la plataforma [1]
+// Configuración del puerto dinámico para Render
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Servidor activo y escuchando en el puerto ${PORT}`);
+    console.log(`Servidor activo en puerto ${PORT}`);
 });
