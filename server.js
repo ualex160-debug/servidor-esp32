@@ -9,7 +9,7 @@ app.use(express.json());
 let datosDeGas = 0;
 let botonPresionado = "APAGADO";
 
-// 1. El ESP32 de Wokwi entrega el valor aquí y recoge la orden del botón
+// 1. El ESP32 de Wokwi entrega el valor aquí y recoge la orden del botón en texto plano
 app.post('/api/gas', (req, res) => {
     if (req.body && req.body.valor !== undefined) {
         datosDeGas = parseInt(req.body.valor);
@@ -17,7 +17,7 @@ app.post('/api/gas', (req, res) => {
     res.status(200).json({ comando: botonPresionado });
 });
 
-// 2. Ruta para los botones de la pantalla HTML
+// 2. Ruta interna para los botones de la pantalla HTML
 app.post('/api/control', (req, res) => {
     if (req.body && req.body.estado) {
         botonPresionado = req.body.estado;
@@ -25,7 +25,7 @@ app.post('/api/control', (req, res) => {
     res.status(200).json({ status: "ok" });
 });
 
-// 3. Interfaz Gráfica para el Usuario
+// 3. Interfaz Gráfica para el Usuario con Auto-Refresco
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
             .btn-off { background: #ff3d00; }
         </style>
         <script>
-            // Forzar actualización de pantalla cada 2 segundos sin usar WebSockets complejos
+            // Forzar actualización de pantalla cada 2 segundos para ver los datos del ESP32
             setInterval(() => { location.reload(); }, 2000);
 
             function cambiarEstado(nuevoEstado) {
