@@ -1,9 +1,9 @@
 // server.js
+// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const axios = require('axios'); // Asegúrate de que 'axios' esté en tus dependencies del package.json
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -12,48 +12,36 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// IP virtual por defecto que expone Wokwi hacia internet externamente
-const WOKWI_ESP32_URL = "http://10.10.0.2:80"; 
 let nivelGas = 0;
-let estadoCircuito = "APAGADO";
+let estadoCircuito = "APAGADO"; 
 
-// Bucle automático de Render para extraer datos de Wokwi (Cada 2 segundos)
-setInterval(async () => {
-    try {
-        const response = await axios.get(`${WOKWI_ESP32_URL}/api/datos`, { timeout: 1500 });
-        if (response.data) {
-            nivelGas = response.data.valor;
-            estadoCircuito = response.data.comando;
-            io.emit('actualizar_gas', { valor: nivelGas });
-            io.emit('cambio_estado', estadoCircuito);
-        }
-    } catch (error) {
-        // Ignora silenciosamente si Wokwi está en pausa o cargando
-    }
-}, 2000);
+// --- ENDPOINTS PARA EL NAVEGADOR Y WOKWI ---
 
-// Endpoint activado por los botones del Dashboard Web
-app.post('/api/control', async (req, res) => {
-    if (req.body && req.body.estado) {
-        estadoCircuito = req.body.estado;
-        io.emit('cambio_estado', estadoCircuito);
-        
-        // Reenviar de inmediato la orden al puerto abierto del ESP32
-        try {
-            await axios.post(`${WOKWI_ESP32_URL}/api/control`, { estado: estadoCircuito }, { timeout: 1500 });
-        } catch (e) {}
-    }
-    res.status(200).json({ status: "ok", estado: estadoCircuito });
+// Obtener el estado actual (Gas y Botón)
+app.get('/api/datos', (req, res) => {
+    res.status(200).json({ valor: nivelGas, comando: estadoCircuito });
 });
 
-// Interfaz Web Gráfica
+// Guardar datos nuevos (llamado por el puente del navegador)
+app.post('/api/actualizar', (req, res) => {
+    if (req.body) {
+        if (req.body.valor !== undefined) nivelGas = parseInt(req.body.valor);
+        if (req.body.estado !== undefined) estadoCircuito = req.body.estado;
+        
+        io.emit('actualizar_web', { valor: nivelGas, estado: estadoCircuito });
+    }
+    res.status(200).json({ status: "ok" });
+});
+
+// --- INTERFAZ WEB GRÁFICA ---
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Panel Directo por Puerto</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Panel Control Gas</title>
         <script src="https://socket.io"></script>
         <style>
             body { font-family: sans-serif; background: #121214; color: #fff; text-align: center; padding-top: 50px; }
@@ -67,30 +55,64 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h2>Monitoreo Conectado por Puerto Local</h2>
+            <h2>Sensor de Gas (Wokwi Link)</h2>
             <div id="gas-val">${nivelGas}</div>
             <p>Circuito Embebido: <span id="estado-txt">${estadoCircuito}</span></p>
             <button class="btn btn-on" onclick="cambiarEstado('ENCENDIDO')">ENCENDER</button>
             <button class="btn btn-off" onclick="cambiarEstado('APAGADO')">APAGAR</button>
         </div>
+
         <script>
             const socket = io();
-            socket.on('actualizar_gas', (data) => {
+            
+            // Recibir actualizaciones en tiempo real
+            socket.on('actualizar_web', (data) => {
                 document.getElementById('gas-val').innerText = data.valor;
                 document.getElementById('gas-val').style.color = data.valor > 2500 ? '#ff3d00' : '#ff9100';
-            });
-            socket.on('cambio_estado', (nuevoEstado) => {
+                
                 const txt = document.getElementById('estado-txt');
-                txt.innerText = nuevoEstado;
-                txt.style.color = nuevoEstado === 'ENCENDIDO' ? '#00e676' : '#ff3d00';
+                txt.innerText = data.estado;
+                txt.style.color = data.estado === 'ENCENDIDO' ? '#00e676' : '#ff3d00';
             });
+
+            // Enviar orden del botón al servidor de Render
             function cambiarEstado(nuevoEstado) {
-                fetch('/api/control', {
+                fetch('/api/actualizar', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ estado: nuevoEstado })
                 });
             }
+
+            // PUENTE AUTOMÁTICO NAVEGADOR -> WOKWI LOCAL (Cada 1.5 segundos)
+            setInterval(async () => {
+                try {
+                    // 1. Leer los datos reales del circuito local de Wokwi en tu PC
+                    const resWokwi = await fetch('http://10.10.0', { mode: 'cors' });
+                    const dataWokwi = await resWokwi.json();
+                    
+                    // 2. Leer cuál es el botón presionado actualmente en Render
+                    const resRender = await fetch('/api/datos');
+                    const dataRender = await resRender.json();
+
+                    // 3. Enviar el gas de Wokwi a Render
+                    await fetch('/api/actualizar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ valor: dataWokwi.valor })
+                    });
+
+                    // 4. Enviar la orden del botón de Render hacia el circuito de Wokwi
+                    await fetch('http://10.10.0', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ estado: dataRender.comando }),
+                        mode: 'cors'
+                    });
+                } catch (e) {
+                    // Ignora errores si Wokwi está en pausa
+                }
+            }, 1500);
         </script>
     </body>
     </html>
